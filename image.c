@@ -1,73 +1,131 @@
-/* File format: first two bytes contain the x and y size of the file in
- * pixels. Remaining bytes encode grayscale pixels
+/* Simple digital image program
+ *
+ * I K Stead, 13-10-2012
  */
 #include <stdio.h>
 #include <stdlib.h>
-#include <SDL/SDL.h>
+#include <time.h>
 
-#define MAX_PX  255
+#define VERSTRING   "Isaac's image format, v0.1"
 
-/* Generate a random integer r such that 0 <= r < range */
-int randint(int range)
+#define HEADER_LEN  32  /* Byte length of whole header field */
+#define D_HEAD_LEN  16  /* Byte length of x and y dimension headers */
+
+/* Generate a random byte value */
+unsigned char randbyte()
 {
-    int r = rand() % range;
-    return r;
+    int r = rand() % 256;
+    return (unsigned char)r;
 }
 
-/* Print the value of an unsigned char in hex notation */
-void printhex(unsigned char byte)
-{
-}
+/* Holds RGB byte values of one pixel */
+typedef struct pixel_struct {
+    unsigned char red;
+    unsigned char green;
+    unsigned char blue;
+} Pixel;
 
-FILE *create(char *name, int size_x, int size_y)
-{
-    FILE *fp = fopen(name, "w+");
-    unsigned char size[] = {(int)size_x, (int)size_y};
-    int w;
-
-    w = fwrite(size, 1, 2, fp);
-
-    return fp;
-}
-
-/* Write pixels to image file one row at a time */
-void write_pixels(unsigned char *pixels, FILE *image)
-{
+/* Holds image pixel dimensions and pointer to pixel array */
+typedef struct image_struct {
+    int x;
     int y;
-    unsigned char size[2];
+    Pixel **pixels;
+} Image;
 
-    rewind(image);
-    fread(size, 1, 2, image);
-    /* Set file position to third byte to avoid overwriting headers */
-    fseek(image, 2, SEEK_SET);
+/* Testing functions */
 
-    /* Iterate through the buffer writing bytes to file one at a time */
-    for (y = 0; y < size[1]; y++) {
-        fwrite(pixels, sizeof(unsigned char), size[0], image);
-    }
-}
-
-unsigned char *create_test_pixels(int size_x, int size_y)
+Pixel pixel_new(unsigned char r, unsigned char g, unsigned char b)
 {
-    unsigned char *pixel_array, pixel;
-    int i;
-    int size = size_x * size_y;
-
-    pixel_array = malloc(size);
-
-    for (i = 0; i < size; i++) {
-        pixel = (unsigned char)randint(256);
-        pixel_array[i] = pixel;
-    }
-    return pixel_array;
+    Pixel newpix = {r, g, b};
+    return newpix;
 }
+
+Pixel **pixel_array_rand(int xd, int yd)
+{
+    int x, y, i;
+    Pixel newpixel;
+    
+    /* Dynamically allocate 2D pixel array */
+    Pixel **newarray = malloc(sizeof *newarray * yd);
+    for (i = 0; i < yd; i++) {
+        newarray[i] = malloc(sizeof *newarray[i] * xd);
+    }
+    printf("OK\n");
+
+    for (y = 0; y < yd; y++) {
+        for (x = 0; x < xd; x++) {
+            newarray[x][y] = pixel_new(randbyte(), randbyte(), randbyte());
+        }
+    }
+    return newarray;
+}
+
+Image *image_new(int x_size, int y_size)
+{
+    Image *newimage = malloc(sizeof(Image));
+    newimage->x = x_size;
+    newimage->y = y_size;
+    newimage->pixels = pixel_array_rand(x_size, y_size);
+
+    return newimage;
+}
+
+int save(Image *image, char *filename)
+{
+    FILE *fp;
+    Pixel *pixelbuf;
+    int x, y;
+    
+    fp = fopen(filename, "w");
+    if (fp == NULL) {
+        printf("Could not open %s for writing", filename);
+        return EXIT_FAILURE;
+    }
+
+    /* Write x and y size into header */
+    int hbuf[] = {image->x, image->y};
+    fwrite(hbuf, sizeof(int), 2, fp);
+    
+    /* Read the 2D pixel array into a 1D buffer */
+    pixelbuf = malloc((image->x * image->y) * sizeof(Pixel));
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            pixelbuf[x+y] = image->pixels[x][y];
+        }
+    }
+    
+    /* Write the 3-byte pixel values from buffer into file */
+    fseek(fp, HEADER_LEN, SEEK_SET);    /* Set file pos to end of header */
+    for (y = 0; y < image->y; y++) {
+        fwrite(pixelbuf, sizeof(Pixel), image->x, fp);
+    }
+
+    fclose(fp);
+    free(pixelbuf);
+    
+    return EXIT_SUCCESS;
+}
+
+//Image *load(char *filename)
+//{
+    /* Read file headers */
+
+    /* Set position past headers */
+
+    /* Read pixels from file into 1D buffer */
+
+    /* Read pixels from 1D buffer into a malloc'd 2D array */
+
+    /* Plug headers values and pointer to pix array into an Image struct and return */
+//}
 
 int main()
 {
-    FILE *fp = create("gangbang.iif", 10, 10);
-    unsigned char *pixels = create_test_pixels(10, 10);
-    write_pixels(pixels, fp);
-    fclose(fp);
+    srand(time(0)); /* Initialise random number generator */
+
+    Image *image = image_new(20, 20);
+    printf("OK\n");
+    save(image, "crips.iif");
 
     return EXIT_SUCCESS;
 }
