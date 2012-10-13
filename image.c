@@ -1,15 +1,16 @@
 /* Simple digital image program
  *
+ * TODO: Add more error checking
+ * TODO: Split things up into separate source files and headers
+ * TODO: SDL code, so I can finally see the images
+ *
  * I K Stead, 13-10-2012
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
-#define VERSTRING   "Isaac's image format, v0.1"
-
 #define HEADER_LEN  32  /* Byte length of whole header field */
-#define D_HEAD_LEN  16  /* Byte length of x and y dimension headers */
 
 /* Generate a random byte value */
 unsigned char randbyte()
@@ -40,7 +41,7 @@ Pixel pixel_new(unsigned char r, unsigned char g, unsigned char b)
     return newpix;
 }
 
-Pixel **pixel_array_rand(int xd, int yd)
+Pixel **pixel_array(int xd, int yd, int random)
 {
     int x, y, i;
     Pixel newpixel;
@@ -51,20 +52,23 @@ Pixel **pixel_array_rand(int xd, int yd)
         newarray[i] = malloc(sizeof *newarray[i] * xd);
     }
 
-    for (y = 0; y < yd; y++) {
-        for (x = 0; x < xd; x++) {
-            newarray[x][y] = pixel_new(randbyte(), randbyte(), randbyte());
+    /* Write random byte values to pixels if random option set */
+    if (rand) {
+        for (y = 0; y < yd; y++) {
+            for (x = 0; x < xd; x++) {
+                newarray[x][y] = pixel_new(randbyte(), randbyte(), randbyte());
+            }
         }
     }
     return newarray;
 }
 
-Image *image_new(int x_size, int y_size)
+Image *image_new(int x_size, int y_size, Pixel **pixels)
 {
     Image *newimage = malloc(sizeof(Image));
     newimage->x = x_size;
     newimage->y = y_size;
-    newimage->pixels = pixel_array_rand(x_size, y_size);
+    newimage->pixels = pixels;
 
     return newimage;
 }
@@ -83,13 +87,13 @@ int image_discard(Image *image)
 
 int save(Image *image, char *filename)
 {
+    int x, y;
     FILE *fp;
     Pixel *pixelbuf;
-    int x, y;
-    
+
     fp = fopen(filename, "w");
     if (fp == NULL) {
-        printf("Could not open %s for writing", filename);
+        printf("Could not open %s for writing\n", filename);
         return EXIT_FAILURE;
     }
 
@@ -97,7 +101,7 @@ int save(Image *image, char *filename)
     int hbuf[] = {image->x, image->y};
     fwrite(hbuf, sizeof(int), 2, fp);
     
-    /* Read the 2D pixel array into a 1D buffer */
+    /* Read the 2D pixel array into a 1D buffer in rows */
     pixelbuf = malloc((image->x * image->y) * sizeof(Pixel));
     for (y = 0; y < image->y; y++) {
         for (x = 0; x < image->x; x++) {
@@ -117,26 +121,54 @@ int save(Image *image, char *filename)
     return EXIT_SUCCESS;
 }
 
-//Image *load(char *filename)
-//{
-    /* Read file headers */
+/* Read an image from disk into a disk object in memory and return reference.
+ * FIXME: all the hbuf[0], hbuf[1] is pretty unreadable, assign them to vars
+ */
+Image *load(char *filename)
+{
+    FILE *fp = fopen(filename, "r");
 
-    /* Set position past headers */
+    if (!fp) {
+        printf("Could not open %s for writing\n", filename);
+        return NULL;
+    }
 
-    /* Read pixels from file into 1D buffer */
+    /* Read x and y sizes from header */
+    int hbuf[2];
+    fread(hbuf, sizeof(int), 2, fp);
 
-    /* Read pixels from 1D buffer into a malloc'd 2D array */
+    /* Read pixel values into buffer */
+    int x, y;
+    Pixel *pixelbuf = malloc((hbuf[0] * hbuf[1]) * sizeof(Pixel));
+    fseek(fp, HEADER_LEN, SEEK_SET);    /* Skip headers */
 
-    /* Plug headers values and pointer to pix array into an Image struct and return */
-//}
+    for (y = 0; y < hbuf[1]; y++)
+        fread(pixelbuf, sizeof(Pixel), hbuf[0], fp);
+
+    /* Insert pixels from buffer into a 2D array, then create a new image
+     * object with all the data we've collected
+     */
+    Pixel **pixels = pixel_array(hbuf[0], hbuf[1], 0);
+
+    for (y = 0; y < hbuf[1]; y++) {
+        for (x = 0; x < hbuf[0]; x++) {
+            pixels[x][y] = pixelbuf[x+y];
+        }
+    }
+    Image *image = image_new(hbuf[0], hbuf[1], pixels);
+
+    /* Clean up */
+    free(pixelbuf);
+    fclose(fp);
+
+    return image;
+}
 
 int main()
 {
     srand(time(0)); /* Initialise random number generator */
 
-    Image *image = image_new(20, 20);
-    printf("OK\n");
-    save(image, "crips.iif");
+    Image *image = load("crips.iif");
     image_discard(image);
 
     return EXIT_SUCCESS;
