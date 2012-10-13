@@ -50,7 +50,6 @@ Pixel **pixel_array_rand(int xd, int yd)
     for (i = 0; i < yd; i++) {
         newarray[i] = malloc(sizeof *newarray[i] * xd);
     }
-    printf("OK\n");
 
     for (y = 0; y < yd; y++) {
         for (x = 0; x < xd; x++) {
@@ -68,6 +67,18 @@ Image *image_new(int x_size, int y_size)
     newimage->pixels = pixel_array_rand(x_size, y_size);
 
     return newimage;
+}
+
+int image_discard(Image *image)
+{
+    int i;
+
+    for (i = 0; i < image->y; i++)
+        free(image->pixels[i]);
+    free(image->pixels);
+    free(image);
+
+    return EXIT_SUCCESS;
 }
 
 int save(Image *image, char *filename)
@@ -126,6 +137,7 @@ int main()
     Image *image = image_new(20, 20);
     printf("OK\n");
     save(image, "crips.iif");
+    image_discard(image);
 
     return EXIT_SUCCESS;
 }
