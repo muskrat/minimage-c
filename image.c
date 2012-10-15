@@ -2,13 +2,13 @@
  *
  * TODO: Add more error checking
  * TODO: Split things up into separate source files and headers
- * TODO: SDL code, so I can finally see the images
  *
  * I K Stead, 13-10-2012
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <SDL/SDL.h>
 
 #define HEADER_LEN  32  /* Byte length of whole header field */
 
@@ -92,7 +92,7 @@ int save(Image *image, char *filename)
     Pixel *pixelbuf;
 
     fp = fopen(filename, "w");
-    if (fp == NULL) {
+    if (!fp)  {
         printf("Could not open %s for writing\n", filename);
         return EXIT_FAILURE;
     }
@@ -109,6 +109,8 @@ int save(Image *image, char *filename)
         }
     }
     
+    printf("Pixel buffer size %li bytes\n", sizeof(*pixelbuf));
+
     /* Write the 3-byte pixel values from buffer into file */
     fseek(fp, HEADER_LEN, SEEK_SET);    /* Set file pos to end of header */
     for (y = 0; y < image->y; y++) {
@@ -123,13 +125,14 @@ int save(Image *image, char *filename)
 
 /* Read an image from disk into a disk object in memory and return reference.
  * FIXME: all the hbuf[0], hbuf[1] is pretty unreadable, assign them to vars
+ * FIXME: bug in here somewhere, pixels possibly being read in wrong order
  */
 Image *load(char *filename)
 {
     FILE *fp = fopen(filename, "r");
 
     if (!fp) {
-        printf("Could not open %s for writing\n", filename);
+        printf("Could not open %s for reading\n", filename);
         return NULL;
     }
 
@@ -144,7 +147,7 @@ Image *load(char *filename)
 
     for (y = 0; y < hbuf[1]; y++)
         fread(pixelbuf, sizeof(Pixel), hbuf[0], fp);
-
+    
     /* Insert pixels from buffer into a 2D array, then create a new image
      * object with all the data we've collected
      */
@@ -164,11 +167,61 @@ Image *load(char *filename)
     return image;
 }
 
+void display(SDL_Surface *surface, Image *image)
+{
+    int x, y;
+    Pixel current;
+    Uint32 colour;
+
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            current = image->pixels[x][y];
+            colour = SDL_MapRGB(surface->format, current.red, current.green, current.blue);
+            SDL_Rect pixel = {x, y, 1, 1};
+            SDL_FillRect(surface, &pixel, colour);
+        }
+    }
+    return;
+}
+
+
 int main()
 {
     srand(time(0)); /* Initialise random number generator */
 
-    Image *image = load("crips.iif");
+    //Pixel **pixels = pixel_array(300, 300, 1);
+    //Image *image = image_new(300, 300, pixels);
+    //save(image, "randompixels.iif");
+    
+    Image *image = load("randompixels.iif");
+
+    /* Set up SDL */
+    SDL_Surface *screen;
+    SDL_Event event;
+    int exit = 0;
+
+    SDL_Init(SDL_INIT_VIDEO);
+    screen = SDL_SetVideoMode(image->x, image->y, 32, SDL_SWSURFACE);
+
+    /* Main loop */
+    while (!exit) {
+        display(screen, image);
+        SDL_Flip(screen);   /* Updates SDL window */
+        
+        /* Check for user input, quit if required */
+        while (SDL_PollEvent(&event)) {
+            switch (event.type) {
+                case SDL_QUIT:
+                    exit = 1;
+                    break;
+                case SDL_KEYDOWN:
+                    exit = 1;
+                    break;
+            }
+        }
+    }
+    SDL_Quit();
+
     image_discard(image);
 
     return EXIT_SUCCESS;
