@@ -10,163 +10,196 @@
 #include <time.h>
 #include <SDL/SDL.h>
 
-#define HEADER_LEN  32  /* Byte length of whole header field */
+#define MAX_SIZE    1020
+
+/*
+ * Helpers
+ */
 
 /* Generate a random byte value */
-unsigned char randbyte()
+unsigned char 
+randbyte()
 {
     int r = rand() % 256;
     return (unsigned char)r;
 }
 
+/* Convert an integer to a byte array */
+void
+int_to_bytes(int n, unsigned char *bytes)
+{
+    bytes[0] = (n >> 24) & 0xff;
+    bytes[1] = (n >> 16) & 0xff;
+    bytes[2] = (n >> 8) & 0xff;
+    bytes[3] = n & 0xff;
+}
+
+
+/*
+ * Data structures
+ */
+
 /* Holds RGB byte values of one pixel */
-typedef struct pixel_struct {
+typedef struct {
     unsigned char red;
     unsigned char green;
     unsigned char blue;
 } Pixel;
 
 /* Holds image pixel dimensions and pointer to pixel array */
-typedef struct image_struct {
+typedef struct {
     int x;
     int y;
     Pixel **pixels;
 } Image;
 
-/* Testing functions */
-
-Pixel pixel_new(unsigned char r, unsigned char g, unsigned char b)
-{
-    Pixel newpix = {r, g, b};
-    return newpix;
-}
-
-Pixel **pixel_array(int xd, int yd, int random)
-{
-    int x, y, i;
-    Pixel newpixel;
-    
-    /* Dynamically allocate 2D pixel array */
-    Pixel **newarray = malloc(sizeof *newarray * yd);
-    for (i = 0; i < yd; i++) {
-        newarray[i] = malloc(sizeof *newarray[i] * xd);
-    }
-
-    /* Write random byte values to pixels if random option set */
-    if (rand) {
-        for (y = 0; y < yd; y++) {
-            for (x = 0; x < xd; x++) {
-                newarray[x][y] = pixel_new(randbyte(), randbyte(), randbyte());
-            }
-        }
-    }
-    return newarray;
-}
-
-Image *image_new(int x_size, int y_size, Pixel **pixels)
-{
-    Image *newimage = malloc(sizeof(Image));
-    newimage->x = x_size;
-    newimage->y = y_size;
-    newimage->pixels = pixels;
-
-    return newimage;
-}
-
-int image_discard(Image *image)
+/* Allocate memory for a 2D array of pixels */
+Pixel **alloc_pixel_array(int size_x, int size_y)
 {
     int i;
+    Pixel **array;
 
-    for (i = 0; i < image->y; i++)
-        free(image->pixels[i]);
-    free(image->pixels);
-    free(image);
+    array = malloc(sizeof *array * size_y);
 
-    return EXIT_SUCCESS;
+    for (i = 0; i < size_y; i++)
+        array[i] = malloc(sizeof *array[i] * size_x);
+
+    return array;
 }
 
-int save(Image *image, char *filename)
-{
-    int x, y;
-    FILE *fp;
-    Pixel *pixelbuf;
 
-    fp = fopen(filename, "w");
-    if (!fp)  {
-        printf("Could not open %s for writing\n", filename);
-        return EXIT_FAILURE;
-    }
-
-    /* Write x and y size into header */
-    int hbuf[] = {image->x, image->y};
-    fwrite(hbuf, sizeof(int), 2, fp);
-    
-    /* Read the 2D pixel array into a 1D buffer in rows */
-    pixelbuf = malloc((image->x * image->y) * sizeof(Pixel));
-    for (y = 0; y < image->y; y++) {
-        for (x = 0; x < image->x; x++) {
-            pixelbuf[x+y] = image->pixels[x][y];
-        }
-    }
-    
-    printf("Pixel buffer size %li bytes\n", sizeof(*pixelbuf));
-
-    /* Write the 3-byte pixel values from buffer into file */
-    fseek(fp, HEADER_LEN, SEEK_SET);    /* Set file pos to end of header */
-    for (y = 0; y < image->y; y++) {
-        fwrite(pixelbuf, sizeof(Pixel), image->x, fp);
-    }
-
-    fclose(fp);
-    free(pixelbuf);
-    
-    return EXIT_SUCCESS;
-}
-
-/* Read an image from disk into a disk object in memory and return reference.
- * FIXME: all the hbuf[0], hbuf[1] is pretty unreadable, assign them to vars
- * FIXME: bug in here somewhere, pixels possibly being read in wrong order
+/*
+ * File save / load functions
  */
-Image *load(char *filename)
+
+int read_header(FILE *fp)
 {
-    FILE *fp = fopen(filename, "r");
+    unsigned char bytes[4];
+    int result, i;
+
+    fread(bytes, 1, 4, fp);
+
+    result = 0;
+
+    for (i = 0; i < 4; i++)
+        result += bytes[i];
+    
+    return result;
+}
+
+Image *load(char *filename)
+{    
+    FILE *fp = fopen(filename, "rb");
 
     if (!fp) {
         printf("Could not open %s for reading\n", filename);
         return NULL;
     }
 
-    /* Read x and y sizes from header */
-    int hbuf[2];
-    fread(hbuf, sizeof(int), 2, fp);
+    /* Build up the image object */
+    Image *image = malloc(sizeof(Image));
 
-    /* Read pixel values into buffer */
-    int x, y;
-    Pixel *pixelbuf = malloc((hbuf[0] * hbuf[1]) * sizeof(Pixel));
-    fseek(fp, HEADER_LEN, SEEK_SET);    /* Skip headers */
+    image->x = read_header(fp);
+    image->y = read_header(fp);
+    image->pixels = alloc_pixel_array(image->x, image->y);
 
-    for (y = 0; y < hbuf[1]; y++)
-        fread(pixelbuf, sizeof(Pixel), hbuf[0], fp);
-    
-    /* Insert pixels from buffer into a 2D array, then create a new image
-     * object with all the data we've collected
+    /* Read 3 byte pixels a row at a time from file into image pixel 
+     * array.
      */
-    Pixel **pixels = pixel_array(hbuf[0], hbuf[1], 0);
+    int x, y;
+    unsigned char pixbuf[3];
 
-    for (y = 0; y < hbuf[1]; y++) {
-        for (x = 0; x < hbuf[0]; x++) {
-            pixels[x][y] = pixelbuf[x+y];
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            fread(pixbuf, 1, 3, fp);
+            image->pixels[x][y].red = pixbuf[0];
+            image->pixels[x][y].green = pixbuf[1];
+            image->pixels[x][y].blue = pixbuf[2];
         }
     }
-    Image *image = image_new(hbuf[0], hbuf[1], pixels);
 
     /* Clean up */
-    free(pixelbuf);
     fclose(fp);
+    
+    return image;
+}
+
+int save(Image *image, char *filename)
+{
+    FILE *fp = fopen(filename, "wb");
+
+    if (!fp)  {
+        printf("Could not open %s for writing\n", filename);
+        return EXIT_FAILURE;
+    }
+
+    /* Write dimensions to file header in bytes */
+    unsigned char sizebuf[4];
+
+    int_to_bytes(image->x, sizebuf);
+    fwrite(sizebuf, 1, 4, fp);
+
+    int_to_bytes(image->y, sizebuf);
+    fwrite(sizebuf, 1, 4, fp);
+
+    int x, y;
+    unsigned char pixbuf[3];
+
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            pixbuf[0] = image->pixels[x][y].red;
+            pixbuf[1] = image->pixels[x][y].green;
+            pixbuf[2] = image->pixels[x][y].blue;
+            fwrite(pixbuf, 1, 3, fp);
+        }
+    }
+
+    fclose(fp);
+
+    return EXIT_SUCCESS;
+}
+
+
+/*
+ * Image creation and manipulation functions
+ */
+
+Image *new_image(int size_x, int size_y)
+{
+    Image *image = malloc(sizeof(Image));
+
+    image->x = size_x;
+    image->y = size_y;
+    image->pixels = alloc_pixel_array(size_x, size_y);
+
+    /* Initialise pixels to black */
+    int x, y;
+
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            image->pixels[x][y].red = 0xff;
+            image->pixels[x][y].green = 0xff;
+            image->pixels[x][y].blue = 0xff;
+        }
+    }
 
     return image;
 }
 
+int randomise_image(Image *image)
+{
+    int x, y;
+
+    for (y = 0; y < image->y; y++) {
+        for (x = 0; x < image->x; x++) {
+            image->pixels[x][y].red = randbyte();
+            image->pixels[x][y].green = randbyte();
+            image->pixels[x][y].blue = randbyte();
+        }
+    }
+
+    return EXIT_SUCCESS;
+}
 void display(SDL_Surface *surface, Image *image)
 {
     int x, y;
@@ -184,16 +217,15 @@ void display(SDL_Surface *surface, Image *image)
     return;
 }
 
-
 int main()
 {
     srand(time(0)); /* Initialise random number generator */
 
-    //Pixel **pixels = pixel_array(300, 300, 1);
-    //Image *image = image_new(300, 300, pixels);
-    //save(image, "randompixels.iif");
-    
-    Image *image = load("randompixels.iif");
+//    Image *image = new_image(100, 100);
+//    randomise_image(image);
+
+//    save(image, "matemaatonga.iif");
+    Image *image = load("matemaatonga.iif");
 
     /* Set up SDL */
     SDL_Surface *screen;
@@ -221,8 +253,6 @@ int main()
         }
     }
     SDL_Quit();
-
-    image_discard(image);
 
     return EXIT_SUCCESS;
 }
